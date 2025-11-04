@@ -1,0 +1,78 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
+from PIL import Image
+import io
+import os
+import urllib.request
+import pandas as pd
+
+
+url = "https://c8.alamy.com/comp/D331HN/flowers-single-red-rose-isolated-on-white-background-D331HN.jpg"
+img_path = "rose.jpg"
+urllib.request.urlretrieve(url, img_path)
+
+img = cv2.imread(img_path)
+img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+print(" Image Loaded:", img.shape)
+
+def jpeg_compress(image, quality):
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    result, encimg = cv2.imencode('.jpg', cv2.cvtColor(image, cv2.COLOR_RGB2BGR), encode_param)
+    decimg = cv2.imdecode(encimg, 1)
+    decimg = cv2.cvtColor(decimg, cv2.COLOR_BGR2RGB)
+    
+  
+    original_size = image.size * image.itemsize
+    compressed_size = encimg.size
+    compression_ratio = original_size / compressed_size
+    bpp = (compressed_size * 8) / (image.shape[0] * image.shape[1])
+    
+    return decimg, compression_ratio, bpp
+
+
+quality_factors = [90, 70, 50, 30, 10]
+results = []
+
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+axes = axes.ravel()
+
+
+axes[0].imshow(img)
+axes[0].set_title("Original Image (Q=100)")
+axes[0].axis("off")
+
+
+for i, Q in enumerate(quality_factors):
+    compressed_img, cr, bpp = jpeg_compress(img, Q)
+    psnr_val = psnr(img, compressed_img)
+    ssim_val = ssim(img, compressed_img, channel_axis=2)
+    results.append([Q, cr, bpp, psnr_val, ssim_val])
+
+    axes[i + 1].imshow(compressed_img)
+    axes[i + 1].set_title(f"Q = {Q}\nPSNR={psnr_val:.2f}, SSIM={ssim_val:.3f}")
+    axes[i + 1].axis("off")
+
+plt.suptitle("Side-by-Side Comparison of DCT + Huffman Compression", fontsize=14)
+plt.tight_layout()
+plt.savefig("Comparison_Grid.png")  
+plt.show()
+
+
+df = pd.DataFrame(results, columns=["Quality Factor (Q)", "Compression Ratio", "Bits Per Pixel (bpp)", "PSNR (dB)", "SSIM"])
+print("\n Compression Analysis Table:\n")
+print(df)
+
+
+plt.figure(figsize=(10, 5))
+plt.plot(df["Quality Factor (Q)"], df["PSNR (dB)"], marker='o', label="PSNR")
+plt.plot(df["Quality Factor (Q)"], df["SSIM"], marker='s', label="SSIM")
+plt.gca().invert_xaxis()
+plt.xlabel("Quality Factor (Q)")
+plt.ylabel("Value")
+plt.title("PSNR & SSIM vs JPEG Quality")
+plt.legend()
+plt.grid(True)
+plt.show()
