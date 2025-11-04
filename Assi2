@@ -1,0 +1,96 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import urllib.request
+
+# Load rose image (grayscale)
+url = "https://c8.alamy.com/comp/D331HN/flowers-single-red-rose-isolated-on-white-background-D331HN.jpg"
+resp = urllib.request.urlopen(url)
+image = np.asarray(bytearray(resp.read()), dtype="uint8")
+img = cv2.imdecode(image, cv2.IMREAD_GRAYSCALE)
+
+# Histogram before equalization
+plt.figure(figsize=(14,6))
+plt.subplot(2,2,1)
+plt.imshow(img, cmap='gray')
+plt.title("Original Image")
+plt.axis("off")
+
+plt.subplot(2,2,2)
+plt.hist(img.ravel(), 256, [0,256])
+plt.title("Original Histogram")
+
+# Equalize
+equalized = cv2.equalizeHist(img)
+
+plt.subplot(2,2,3)
+plt.imshow(equalized, cmap='gray')
+plt.title("Equalized Image")
+plt.axis("off")
+
+plt.subplot(2,2,4)
+plt.hist(equalized.ravel(), 256, [0,256])
+plt.title("Equalized Histogram")
+
+# 1. Averaging filter (smoothing)
+avg_filter = cv2.blur(img, (5,5))
+
+# 2. Gaussian filter
+gauss_filter = cv2.GaussianBlur(img, (5,5), 0)
+
+# 3. Median filter
+median_filter = cv2.medianBlur(img, 5)
+
+# 4. Sharpening filter
+kernel = np.array([[0,-1,0],[-1,5,-1],[0,-1,0]])
+sharpened = cv2.filter2D(img, -1, kernel)
+
+plt.figure(figsize=(12,8))
+filters = [avg_filter, gauss_filter, median_filter, sharpened]
+titles = ["Averaging", "Gaussian", "Median", "Sharpened"]
+
+for i in range(4):
+    plt.subplot(2,2,i+1)
+    plt.imshow(filters[i], cmap='gray')
+    plt.title(titles[i])
+    plt.axis("off")
+plt.suptitle("Spatial Domain Filters")
+plt.show()
+
+# ==============================
+# 🔹 FREQUENCY DOMAIN FILTERS
+# ==============================
+
+# Fourier Transform
+f = np.fft.fft2(img)
+fshift = np.fft.fftshift(f)
+magnitude_spectrum = 20*np.log(np.abs(fshift) + 1)
+
+# Low Pass Filter (smoothing)
+rows, cols = img.shape
+crow, ccol = rows//2 , cols//2
+mask = np.zeros((rows, cols), np.uint8)
+mask[crow-30:crow+30, ccol-30:ccol+30] = 1
+
+low_pass = fshift * mask
+low_img = np.fft.ifft2(np.fft.ifftshift(low_pass))
+low_img = np.abs(low_img)
+
+# High Pass Filter (edge enhancement)
+mask = np.ones((rows, cols), np.uint8)
+mask[crow-30:crow+30, ccol-30:ccol+30] = 0
+
+high_pass = fshift * mask
+high_img = np.fft.ifft2(np.fft.ifftshift(high_pass))
+high_img = np.abs(high_img)
+
+plt.figure(figsize=(14,8))
+plt.subplot(2,3,1), plt.imshow(img, cmap='gray'), plt.title("Original"), plt.axis("off")
+plt.subplot(2,3,2), plt.imshow(magnitude_spectrum, cmap='gray'), plt.title("FFT Magnitude"), plt.axis("off")
+plt.subplot(2,3,3), plt.imshow(low_img, cmap='gray'), plt.title("Low Pass (Smooth)"), plt.axis("off")
+plt.subplot(2,3,4), plt.imshow(high_img, cmap='gray'), plt.title("High Pass (Edges)"), plt.axis("off")
+plt.suptitle("Frequency Domain Filters")
+plt.show()
+
+plt.tight_layout()
+plt.show()
