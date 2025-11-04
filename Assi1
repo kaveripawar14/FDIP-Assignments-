@@ -1,0 +1,51 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import urllib.request
+
+# Read image from URL in grayscale (8-bit image)
+url = "https://c8.alamy.com/comp/D331HN/flowers-single-red-rose-isolated-on-white-background-D331HN.jpg"
+resp = urllib.request.urlopen(url)
+image = np.asarray(bytearray(resp.read()), dtype="uint8")
+img = cv2.imdecode(image, cv2.IMREAD_GRAYSCALE)
+
+if img is None:
+    print("Error: Image not loaded. Please check the URL or path.")
+else:
+    # (a) Brightness Improvement
+    bright_img = cv2.convertScaleAbs(img, alpha=1, beta=50)
+
+    # (b) Brightness Reduction
+    dark_img = np.clip(img - 50, 0, 255).astype(np.uint8)
+
+    # (c) Thresholding
+    _, thresh_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
+    # (d) Negative of an image
+    negative_img = 255 - img
+
+    # (e) Log Transformation
+    img_float = img.astype(float)
+    c = 255 / np.log(1 + np.max(img_float))
+    log_img = c * np.log(1 + img_float)
+    log_img = np.array(log_img, dtype=np.uint8)
+
+    # (f) Power Law (Gamma) Transformation
+    gamma = 0.5
+    gamma_img = np.array(255 * ((img / 255.0) ** gamma), dtype=np.uint8)
+
+    # Display results
+    plt.figure(figsize=(14,10))
+
+    titles = ["Brightness Improved", "Brightness Reduced", "Thresholding",
+              "Negative", "Log Transformation", "Power Law (Gamma)"]
+    images = [bright_img, dark_img, thresh_img, negative_img, log_img, gamma_img]
+
+    for i in range(6):
+        plt.subplot(2,3,i+1)
+        plt.imshow(images[i], cmap='gray')
+        plt.title(titles[i], fontsize=12)
+        plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
