@@ -1,0 +1,192 @@
+import os
+from glob import glob
+import cv2
+import numpy as np
+from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
+import matplotlib.pyplot as plt
+
+dataset_path = r"C:\\FDIP\\Traffic_management_project\\Dataset\\images\\Traffic Management\\Traffic Dataset\\images\\test"   
+out_root = "output_restoration"
+os.makedirs(out_root, exist_ok=True)
+folders = ["original", "degraded", "inverse", "wiener"]
+for f in folders:
+    os.makedirs(os.path.join(out_root, f), exist_ok=True)
+
+simulate_degradation = True  
+blur_type = "motion"         
+motion_len = 15
+motion_angle = 0            
+gaussian_ksize = (9,9)
+gaussian_sigma = 3.0
+noise_sigma = 10.0 
+
+K = 0.01   
+eps = 1e-6 
+inv_threshold = 1e-3
+
+
+def make_motion_kernel(length, angle, shape):
+    """Create motion blur kernel (PSF) centered in shape (2D)."""
+    # create an empty kernel
+    kernel = np.zeros(shape, dtype=np.float32)
+    # center
+    center = (shape[0] // 2, shape[1] // 2)
+    angle_rad = np.deg2rad(angle)
+    # coordinates along the motion line
+    dx = np.cos(angle_rad)
+    dy = np.sin(angle_rad)
+    half = (length - 1) / 2.0
+    for i in range(length):
+        offset = i - half
+        x = int(round(center[0] + offset * dy))
+        y = int(round(center[1] + offset * dx))
+        if 0 <= x < shape[0] and 0 <= y < shape[1]:
+            kernel[x, y] = 1.0
+    kernel /= kernel.sum() + 1e-12
+    return kernel
+
+def degrade_image(img):
+    """Apply blur (motion or gaussian) and additive Gaussian noise."""
+    h, w = img.shape[:2]
+    if blur_type == "motion":
+        # create PSF kernel same size as image but small support
+        psf_small = make_motion_kernel(motion_len, motion_angle, (motion_len, motion_len))
+        # apply via filter2D (center PSF appropriately)
+        blurred = cv2.filter2D(img, -1, psf_small)
+        psf = psf_small
+    else:
+        blurred = cv2.GaussianBlur(img, gaussian_ksize, gaussian_sigma)
+        # approximate PSF as gaussian kernel small size:
+        psf = cv2.getGaussianKernel(gaussian_ksize[0], gaussian_sigma)
+        psf = psf @ psf.T
+
+    # Add Gaussian noise (on uint8 scale)
+    noise = np.random.normal(0, noise_sigma, img.shape).astype(np.float32)
+    degraded = np.clip(blurred.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    return degraded, psf
+
+def pad_psf_to_img(psf, img_shape):
+    """Pad PSF to image shape and center it (for frequency-domain multiplication)."""
+    ph, pw = psf.shape
+    h, w = img_shape[:2]
+    pad = np.zeros((h, w), dtype=np.float32)
+    # place PSF top-left then circularly shift to center
+    pad[:ph, :pw] = psf
+    # shift to center
+    pad = np.roll(pad, -ph//2, axis=0)
+    pad = np.roll(pad, -pw//2, axis=1)
+    return pad
+
+def dft2(img):
+    return np.fft.fft2(img)
+
+def idft2(spec):
+    return np.fft.ifft2(spec)
+
+def inverse_filter(degraded_gray, H):
+    """Inverse filter in frequency domain with thresholding to avoid noise amplification."""
+    G = dft2(degraded_gray)
+    H_abs = np.abs(H)
+    H_safe = H.copy()
+    # Avoid division by very small values
+    H_safe[H_abs < inv_threshold] = inv_threshold
+    F_hat = G / H_safe
+    f_hat = np.real(idft2(F_hat))
+    # clip and return uint8
+    f_hat_clipped = np.clip(f_hat, 0, 255).astype(np.uint8)
+    return f_hat_clipped
+
+def wiener_filter(degraded_gray, H, K=0.01):
+    """Wiener filter (approximate) in frequency domain.
+       F_hat = (H* / (|H|^2 + K)) * G
+    """
+    G = dft2(degraded_gray)
+    H_conj = np.conj(H)
+    denom = (np.abs(H) ** 2) + K
+    W = H_conj / (denom + eps)
+    F_hat = W * G
+    f_hat = np.real(idft2(F_hat))
+    f_hat_clipped = np.clip(f_hat, 0, 255).astype(np.uint8)
+    return f_hat_clipped
+
+
+image_paths = glob(os.path.join(dataset_path, "*.jpg")) + glob(os.path.join(dataset_path, "*.png"))
+if len(image_paths) == 0:
+    raise Exception("No images found in dataset_path. Update the path and re-run.")
+
+summary = []
+
+for i, p in enumerate(image_paths):
+    print(f"\nProcessing ({i+1}/{len(image_paths)}): {os.path.basename(p)}")
+    img_bgr = cv2.imread(p)
+    if img_bgr is None:
+        print("  Warning: couldn't read", p)
+        continue
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    # Save original (for reference)
+    orig_save = os.path.join(out_root, "original", os.path.basename(p))
+    cv2.imwrite(orig_save, cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+
+    
+    if simulate_degradation:
+        degraded_rgb, psf = degrade_image(img_rgb)
+        # save degraded
+        cv2.imwrite(os.path.join(out_root, "degraded", os.path.basename(p)),
+                    cv2.cvtColor(degraded_rgb, cv2.COLOR_RGB2BGR))
+        # prepare H (frequency response)
+        psf_padded = pad_psf_to_img(psf, degraded_rgb.shape)
+        H = np.fft.fft2(psf_padded)
+    else:
+        degraded_rgb = img_rgb.copy()
+        # assume identity PSF (no blur)
+        psf = np.zeros((3,3), dtype=np.float32); psf[1,1]=1.0
+        psf_padded = pad_psf_to_img(psf, degraded_rgb.shape)
+        H = np.fft.fft2(psf_padded)
+
+    
+    orig_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    degraded_gray = cv2.cvtColor(degraded_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
+
+   
+    inv_restored = inverse_filter(degraded_gray, H)
+    cv2.imwrite(os.path.join(out_root, "inverse", os.path.basename(p)),
+                cv2.cvtColor(inv_restored, cv2.COLOR_GRAY2BGR))
+
+ 
+    wiener_restored = wiener_filter(degraded_gray, H, K=K)
+    cv2.imwrite(os.path.join(out_root, "wiener", os.path.basename(p)),
+                cv2.cvtColor(wiener_restored, cv2.COLOR_GRAY2BGR))
+
+   
+    psnr_inv = psnr(orig_gray, inv_restored, data_range=255)
+    psnr_win = psnr(orig_gray, wiener_restored, data_range=255)
+    ssim_inv = ssim(orig_gray, inv_restored, data_range=255)
+    ssim_win = ssim(orig_gray, wiener_restored, data_range=255)
+
+    print(f"  PSNR - Inverse: {psnr_inv:.3f} dB | Wiener: {psnr_win:.3f} dB")
+    print(f"  SSIM - Inverse: {ssim_inv:.4f}     | Wiener: {ssim_win:.4f}")
+
+    summary.append({
+        "file": os.path.basename(p),
+        "psnr_inv": psnr_inv,
+        "psnr_win": psnr_win,
+        "ssim_inv": ssim_inv,
+        "ssim_win": ssim_win
+    })
+
+
+if summary:
+    avg_psnr_inv = np.mean([x["psnr_inv"] for x in summary])
+    avg_psnr_win = np.mean([x["psnr_win"] for x in summary])
+    avg_ssim_inv = np.mean([x["ssim_inv"] for x in summary])
+    avg_ssim_win = np.mean([x["ssim_win"] for x in summary])
+    print("\n==== AVERAGE METRICS OVER DATASET ====")
+    print(f"Avg PSNR - Inverse: {avg_psnr_inv:.3f} dB | Wiener: {avg_psnr_win:.3f} dB")
+    print(f"Avg SSIM - Inverse: {avg_ssim_inv:.4f}     | Wiener: {avg_ssim_win:.4f}")
+    print("Restored images and degraded versions are saved under:", out_root)
+
+
+print("\nShort Comments / Observations:")
+print("- Inverse filter tries to divide out the blur by (frequency) division. If H has small values, it amplifies noise -> noisy/artifacted outputs.")
+print("- Wiener filter trades off inverse with noise suppression by using a regularizer (K). Typically Wiener yields better overall PSNR/SSIM in presence of noise.")
+print("- Tune K (noise-to-signal ratio) and inv_threshold for best practical results. For real-world nonstationary noise, spatial-domain methods or more advanced deconvolution (RL, TV, deep nets) often perform better.")
