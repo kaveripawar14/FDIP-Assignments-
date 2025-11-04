@@ -1,0 +1,66 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from glob import glob
+
+
+dataset_path = r"C:\\FDIP\\Traffic_management_project\\Dataset\\images\\Traffic Management\\Traffic Dataset\\images\\test"  # Change this path
+image_paths = glob(os.path.join(dataset_path, "*.jpg")) + glob(os.path.join(dataset_path, "*.png"))
+
+if not image_paths:
+    raise Exception(" No images found in folder. Please check your dataset path.")
+
+# Function to add different types of noise
+def add_gaussian_noise(image, mean=0, var=0.01):
+    image = np.float32(image) / 255.0
+    noise = np.random.normal(mean, var ** 0.5, image.shape)
+    noisy = np.clip(image + noise, 0, 1)
+    return np.uint8(noisy * 255)
+
+def add_salt_pepper_noise(image, amount=0.02):
+    noisy = image.copy()
+    num_salt = np.ceil(amount * image.size * 0.5)
+    num_pepper = np.ceil(amount * image.size * 0.5)
+
+    # Salt noise (white pixels)
+    coords = [np.random.randint(0, i - 1, int(num_salt)) for i in image.shape[:2]]
+    noisy[coords[0], coords[1]] = 255
+
+    # Pepper noise (black pixels)
+    coords = [np.random.randint(0, i - 1, int(num_pepper)) for i in image.shape[:2]]
+    noisy[coords[0], coords[1]] = 0
+    return noisy
+
+def add_impulse_noise(image, amount=0.02):
+    noisy = image.copy()
+    mask = np.random.choice((0, 1, 2), size=image.shape[:2], p=[1-amount, amount/2, amount/2])
+    noisy[mask == 1] = 255
+    noisy[mask == 2] = 0
+    return noisy
+
+sample_img_path = image_paths[0]
+img = cv2.imread(sample_img_path)
+img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+gaussian_img = add_gaussian_noise(img)
+sp_img = add_salt_pepper_noise(img, amount=0.05)
+impulse_img = add_impulse_noise(img)
+
+
+titles = ['Original Image', 'Gaussian Noise', 'Salt & Pepper', 'Impulse Noise']
+images = [img, gaussian_img, sp_img, impulse_img]
+
+plt.figure(figsize=(12, 6))
+for i in range(4):
+    plt.subplot(2, 4, i + 1)
+    plt.imshow(images[i])
+    plt.title(titles[i])
+    plt.axis('off')
+
+for i in range(4):
+    plt.subplot(2, 4, i + 5)
+    plt.hist(images[i].ravel(), bins=256, color='gray')
+    plt.title(titles[i] + ' Histogram')
+plt.tight_layout()
+plt.show()
