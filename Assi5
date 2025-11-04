@@ -1,0 +1,50 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+import urllib.request
+
+# Step 1: Load image from URL
+url = "https://c8.alamy.com/comp/D331HN/flowers-single-red-rose-isolated-on-white-background-D331HN.jpg"
+resp = urllib.request.urlopen(url)
+image = np.asarray(bytearray(resp.read()), dtype="uint8")
+img = cv2.imdecode(image, cv2.IMREAD_GRAYSCALE)
+
+# Display Original Image and Histogram
+plt.figure(figsize=(15,6))
+plt.subplot(2,3,1)
+plt.imshow(img, cmap='gray')
+plt.title("Original Image")
+plt.axis("off")
+
+plt.subplot(2,3,4)
+plt.hist(img.ravel(), bins=256, range=(0,256), color='black')
+plt.title("Original Histogram")
+
+# Step 2: Contrast Stretching
+r_min, r_max = np.min(img), np.max(img)
+stretched = ((img - r_min) / (r_max - r_min) * 255).astype(np.uint8)
+
+plt.subplot(2,3,2)
+plt.imshow(stretched, cmap='gray')
+plt.title("Contrast Stretched Image")
+plt.axis("off")
+
+plt.subplot(2,3,5)
+plt.hist(stretched.ravel(), bins=256, range=(0,256), color='black')
+plt.title("Stretched Histogram")
+
+# Step 3: Histogram Equalization
+equalized = cv2.equalizeHist(img)
+
+plt.subplot(2,3,3)
+plt.imshow(equalized, cmap='gray')
+plt.title("Histogram Equalized Image")
+plt.axis("off")
+
+plt.subplot(2,3,6)
+plt.hist(equalized.ravel(), bins=256, range=(0,256), color='black')
+plt.title("Equalized Histogram")
+
+plt.tight_layout()
+plt.show()
